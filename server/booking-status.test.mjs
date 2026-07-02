@@ -27,7 +27,7 @@ async function waitForServer() {
 test('booking status can be updated', async (t) => {
   serverProcess = spawn(process.execPath, ['server.js'], {
     cwd: serverDir,
-    env: { ...process.env, PORT: String(port) },
+    env: { ...process.env, PORT: String(port), MONGODB_URI: '' },
     stdio: ['ignore', 'pipe', 'pipe'],
   })
   t.after(async () => {
