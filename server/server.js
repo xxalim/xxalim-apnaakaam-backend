@@ -10,22 +10,31 @@ import { Server as SocketIOServer } from 'socket.io'
 import helmet from 'helmet'
 import rateLimit from 'express-rate-limit'
 import { v2 as cloudinary } from 'cloudinary'
-
+import User from './models/User.js'
+import Professional from './models/Professional.js'
+import Booking from './models/Booking.js'
+import Review from './models/Review.js'
+import Notification from './models/Notification.js'
+import ChatMessage from './models/ChatMessage.js'
+import { hashPassword, verifyPassword } from "./utils/hash.js";
 dotenv.config()
-
+import { signToken, verifyToken } from "./utils/jwt.js";
 const app = express()
 const port = Number(process.env.PORT || 5000)
 const httpServer = createServer(app)
 const io = new SocketIOServer(httpServer, { cors: { origin: '*' } })
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } })
 
-const memoryUsers = []
-const memorySessions = new Map()
-const memoryNotifications = []
-const memoryOtpCodes = new Map()
-const memoryChatMessages = []
-const memoryReviews = []
-const memoryProfessionals = [
+import {
+  memoryUsers,
+  memorySessions,
+  memoryNotifications,
+  memoryOtpCodes,
+  memoryChatMessages,
+  memoryReviews,
+  memoryProfessionals,
+  memoryBookings,
+} from "./store/memoryStore.js";
   {
     id: 1,
     name: 'Aman Verma',
@@ -60,131 +69,12 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 })
 
-const userSchema = new mongoose.Schema(
-  {
-    name: String,
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true },
-    role: { type: String, default: 'customer' },
-    imageUrl: String,
-  },
-  { timestamps: true },
-)
-
-const professionalSchema = new mongoose.Schema(
-  {
-    name: { type: String, required: true },
-    service: { type: String, required: true },
-    location: { type: String, required: true },
-    experienceYears: { type: Number, required: true },
-    completedJobs: { type: Number, required: true },
-    phone: String,
-    description: String,
-    rating: { type: Number, default: 4.8 },
-    distance: { type: String, default: 'Newly joined' },
-    specialties: { type: [String], default: ['Verified'] },
-    imageUrl: String,
-    ownerUserId: String,
-    bio: String,
-    availability: String,
-    rate: String,
-  },
-  { timestamps: true },
-)
-
-const bookingSchema = new mongoose.Schema(
-  {
-    professionalId: mongoose.Schema.Types.Mixed,
-    professionalName: String,
-    service: String,
-    userName: String,
-    userEmail: String,
-    phone: String,
-    preferredDate: String,
-    message: String,
-    status: { type: String, default: 'pending' },
-    paymentStatus: { type: String, default: 'pending' },
-    adminNote: String,
-    scheduledDate: String,
-    userId: String,
-  },
-  { timestamps: true },
-)
-
-const reviewSchema = new mongoose.Schema(
-  {
-    professionalId: { type: mongoose.Schema.Types.ObjectId, ref: 'Professional' },
-    userId: String,
-    userName: String,
-    rating: { type: Number, min: 1, max: 5 },
-    comment: String,
-  },
-  { timestamps: true },
-)
-
-const notificationSchema = new mongoose.Schema(
-  {
-    userId: String,
-    message: String,
-    type: { type: String, default: 'info' },
-    read: { type: Boolean, default: false },
-  },
-  { timestamps: true },
-)
-
-const chatMessageSchema = new mongoose.Schema(
-  {
-    roomId: { type: String, required: true, index: true },
-    bookingId: String,
-    senderId: String,
-    senderName: String,
-    senderRole: String,
-    message: { type: String, required: true },
-  },
-  { timestamps: true },
-)
-
-const User = mongoose.model('User', userSchema)
-const Professional = mongoose.model('Professional', professionalSchema)
-const Booking = mongoose.model('Booking', bookingSchema)
-const Review = mongoose.model('Review', reviewSchema)
-const Notification = mongoose.model('Notification', notificationSchema)
-const ChatMessage = mongoose.model('ChatMessage', chatMessageSchema)
 
 let databaseReady = false
 let useMemoryStore = true
 
 function sendJson(res, status, data) {
   res.status(status).json(data)
-}
-
-function hashPassword(password) {
-  const salt = crypto.randomBytes(8).toString('hex')
-  const hash = crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex')
-  return `${salt}:${hash}`
-}
-
-function signToken(user) {
-  return jwt.sign({ id: user.id || user._id?.toString(), name: user.name, email: user.email, role: user.role }, process.env.JWT_SECRET || 'dev-secret', {
-    expiresIn: '7d',
-  })
-}
-
-function verifyPassword(password, storedPassword) {
-  const [salt, hash] = storedPassword.split(':')
-  const expectedHash = crypto.createHash('sha256').update(`${salt}:${password}`).digest('hex')
-  return hash === expectedHash
-}
-
-function verifyAuth(req) {
-  const token = req.headers.authorization?.replace('Bearer ', '')
-  if (!token) return null
-
-  try {
-    return jwt.verify(token, process.env.JWT_SECRET || 'dev-secret')
-  } catch {
-    return null
-  }
 }
 
 function requireAuth(req, res) {
