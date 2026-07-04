@@ -18,6 +18,8 @@ import Notification from './models/Notification.js'
 import ChatMessage from './models/ChatMessage.js'
 import { hashPassword, verifyPassword } from "./utils/hash.js";
 dotenv.config()
+import professionalRoutes from "./routes/professionalRoutes.js";
+import authRoutes from "./routes/authroutes.js";
 import { signToken, verifyToken } from "./utils/jwt.js";
 const app = express()
 const port = Number(process.env.PORT || 5000)
@@ -35,33 +37,6 @@ import {
   memoryProfessionals,
   memoryBookings,
 } from "./store/memoryStore.js";
-  {
-    id: 1,
-    name: 'Aman Verma',
-    service: 'Electrician',
-    location: 'Noida',
-    experienceYears: 8,
-    completedJobs: 180,
-    rating: 4.8,
-    distance: '2.3 km',
-    description: 'Fast and reliable home wiring, fan fitting, and switchboard repair.',
-    specialties: ['Wiring', 'Fans', 'Appliances'],
-    imageUrl: '',
-  },
-  {
-    id: 2,
-    name: 'Ravi Sharma',
-    service: 'Plumber',
-    location: 'Noida',
-    experienceYears: 12,
-    completedJobs: 260,
-    rating: 4.9,
-    distance: '4.1 km',
-    description: 'Skilled in leak fixing, water tank installation, and bathroom plumbing.',
-    specialties: ['Leak repair', 'Pipes', 'Water tanks'],
-    imageUrl: '',
-  },
-]
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -156,8 +131,6 @@ async function getProfessionals() {
 
   return memoryProfessionals
 }
-
-const memoryBookings = []
 
 async function getDashboardBookings(verifiedUser) {
   if (databaseReady && !useMemoryStore) {
@@ -320,6 +293,8 @@ async function addBooking(payload) {
 app.use(helmet())
 app.use(cors({ origin: '*' }))
 app.use(express.json({ limit: '10mb' }))
+app.use("/api/auth", authRoutes)
+app.use("/api/professionals", professionalRoutes)
 app.use(express.urlencoded({ extended: true }))
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200 }))
 
@@ -339,105 +314,6 @@ app.get('/api/services', (_req, res) => {
     'More Services',
   ])
 })
-
-app.get('/api/professionals', async (_req, res) => {
-  try {
-    const professionals = await getProfessionals()
-    sendJson(res, 200, professionals)
-  } catch (error) {
-    sendJson(res, 500, { success: false, message: error.message || 'Failed to load professionals.' })
-  }
-})
-
-app.post('/api/professionals', async (req, res) => {
-  try {
-    const data = req.body || {}
-    const verifiedUser = verifyAuth(req)
-    const professional = await addProfessional({
-      name: data.name,
-      service: data.service,
-      location: data.location,
-      experienceYears: Number(data.experienceYears) || 1,
-      completedJobs: Number(data.completedJobs) || 0,
-      phone: data.phone || '',
-      description: data.description || '',
-      imageUrl: data.imageUrl || '',
-      specialties: data.specialties || ['Verified', 'New profile'],
-      ownerUserId: verifiedUser?.id || data.ownerUserId || '',
-      bio: data.bio || data.description || '',
-      availability: data.availability || 'Available today',
-      rate: data.rate || '',
-    })
-
-    sendJson(res, 201, { success: true, professional })
-  } catch (error) {
-    sendJson(res, 500, { success: false, message: error.message || 'Failed to register professional.' })
-  }
-})
-
-app.post('/api/professionals/profile', async (req, res) => {
-  try {
-    const verifiedUser = requireAuth(req, res)
-    if (!verifiedUser) return
-
-    const data = req.body || {}
-    const profilePayload = {
-      bio: data.bio || '',
-      availability: data.availability || 'Available today',
-      rate: data.rate || '',
-      imageUrl: data.imageUrl || '',
-    }
-
-    if (databaseReady && !useMemoryStore) {
-      const profile = await Professional.findOneAndUpdate(
-        { ownerUserId: verifiedUser.id },
-        {
-          $set: {
-            ownerUserId: verifiedUser.id,
-            name: data.name || verifiedUser.name || 'Professional',
-            service: data.service || 'General Service',
-            location: data.location || 'Local area',
-            experienceYears: Number(data.experienceYears) || 1,
-            completedJobs: Number(data.completedJobs) || 0,
-            description: profilePayload.bio,
-            ...profilePayload,
-          },
-        },
-        { new: true, upsert: true, setDefaultsOnInsert: true },
-      ).lean()
-      sendJson(res, 200, { success: true, profile })
-      return
-    }
-
-    let profile = memoryProfessionals.find((professional) => professional.ownerUserId === verifiedUser.id)
-    if (!profile) {
-      profile = {
-        id: Date.now(),
-        ownerUserId: verifiedUser.id,
-        name: data.name || verifiedUser.name || 'Professional',
-        service: data.service || 'General Service',
-        location: data.location || 'Local area',
-        experienceYears: Number(data.experienceYears) || 1,
-        completedJobs: Number(data.completedJobs) || 0,
-        rating: 4.8,
-        distance: 'Newly joined',
-        specialties: ['Verified', 'Updated profile'],
-        imageUrl: profilePayload.imageUrl,
-      }
-      memoryProfessionals.unshift(profile)
-    }
-
-    Object.assign(profile, {
-      ...profilePayload,
-      description: profilePayload.bio || profile.description,
-    })
-
-    sendJson(res, 200, { success: true, profile })
-  } catch (error) {
-    sendJson(res, 500, { success: false, message: error.message || 'Could not update profile.' })
-  }
-})
-
 app.post('/api/upload/image', upload.single('image'), async (req, res) => {
   if (!req.file) {
     sendJson(res, 400, { success: false, message: 'Please choose an image file.' })
@@ -506,162 +382,6 @@ app.post('/api/bookings', async (req, res) => {
   }
 })
 
-app.post('/api/auth/signup', async (req, res) => {
-  try {
-    const { name, email, password, role = 'customer' } = req.body || {}
-
-    if (!name || !email || !password) {
-      sendJson(res, 400, { success: false, message: 'Please fill in all required fields.' })
-      return
-    }
-
-    const existingUser = await getUserByEmail(email)
-    if (existingUser) {
-      sendJson(res, 409, { success: false, message: 'An account with this email already exists.' })
-      return
-    }
-
-    const newUser = {
-      id: crypto.randomUUID(),
-      name,
-      email,
-      role,
-      password: hashPassword(password),
-    }
-
-    if (databaseReady && !useMemoryStore) {
-      const createdUser = await User.create(newUser)
-      const token = signToken(createdUser)
-      memorySessions.set(token, createdUser._id.toString())
-      sendJson(res, 201, {
-        success: true,
-        message: 'Account created successfully.',
-        token,
-        user: { id: createdUser._id.toString(), name: createdUser.name, email: createdUser.email, role: createdUser.role },
-      })
-      return
-    }
-
-    memoryUsers.push(newUser)
-    const token = signToken(newUser)
-    memorySessions.set(token, newUser.id)
-    sendJson(res, 201, {
-      success: true,
-      message: 'Account created successfully.',
-      token,
-      user: { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role },
-    })
-  } catch (error) {
-    sendJson(res, 500, { success: false, message: error.message || 'Signup failed.' })
-  }
-})
-
-app.post('/api/auth/send-otp', async (req, res) => {
-  try {
-    const { email, phone } = req.body || {}
-    if (!email || !phone) {
-      sendJson(res, 400, { success: false, message: 'Email and phone are required.' })
-      return
-    }
-
-    const code = Math.floor(100000 + Math.random() * 900000).toString()
-    memoryOtpCodes.set(`${email}:${phone}`, { code, expiresAt: Date.now() + 10 * 60 * 1000 })
-
-    sendJson(res, 200, {
-      success: true,
-      message: 'OTP sent successfully.',
-      debugCode: code,
-    })
-  } catch (error) {
-    sendJson(res, 500, { success: false, message: error.message || 'OTP send failed.' })
-  }
-})
-
-app.post('/api/auth/verify-otp', async (req, res) => {
-  try {
-    const { email, phone, code } = req.body || {}
-    if (!email || !phone || !code) {
-      sendJson(res, 400, { success: false, message: 'Email, phone, and code are required.' })
-      return
-    }
-
-    const stored = memoryOtpCodes.get(`${email}:${phone}`)
-    if (!stored) {
-      sendJson(res, 400, { success: false, message: 'No OTP found for this contact.' })
-      return
-    }
-
-    if (Date.now() > stored.expiresAt) {
-      memoryOtpCodes.delete(`${email}:${phone}`)
-      sendJson(res, 400, { success: false, message: 'OTP expired.' })
-      return
-    }
-
-    if (stored.code !== code) {
-      sendJson(res, 400, { success: false, message: 'Invalid OTP.' })
-      return
-    }
-
-    memoryOtpCodes.delete(`${email}:${phone}`)
-    sendJson(res, 200, { success: true, message: 'OTP verified successfully.', verified: true })
-  } catch (error) {
-    sendJson(res, 500, { success: false, message: error.message || 'OTP verification failed.' })
-  }
-})
-
-app.post('/api/auth/login', async (req, res) => {
-  try {
-    const { email, password } = req.body || {}
-
-    if (!email || !password) {
-      sendJson(res, 400, { success: false, message: 'Email and password are required.' })
-      return
-    }
-
-    const user = await getUserByEmail(email)
-    if (!user || !verifyPassword(password, user.password)) {
-      sendJson(res, 401, { success: false, message: 'Invalid email or password.' })
-      return
-    }
-
-    const token = signToken(user)
-    const userId = databaseReady && !useMemoryStore ? user._id.toString() : user.id
-    memorySessions.set(token, userId)
-
-    sendJson(res, 200, {
-      success: true,
-      message: 'Login successful.',
-      token,
-      user: {
-        id: userId,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-      },
-    })
-  } catch (error) {
-    sendJson(res, 500, { success: false, message: error.message || 'Login failed.' })
-  }
-})
-
-app.get('/api/auth/me', async (req, res) => {
-  try {
-    const token = req.headers.authorization?.replace('Bearer ', '')
-    const user = token ? await getUserByToken(token) : null
-
-    if (!user) {
-      sendJson(res, 401, { success: false, message: 'Not authenticated.' })
-      return
-    }
-
-    sendJson(res, 200, {
-      success: true,
-      user: { id: user.id || user._id.toString(), name: user.name, email: user.email, role: user.role },
-    })
-  } catch (error) {
-    sendJson(res, 500, { success: false, message: error.message || 'Session lookup failed.' })
-  }
-})
 
 app.get('/api/dashboard', async (req, res) => {
   try {
